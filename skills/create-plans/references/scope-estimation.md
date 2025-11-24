@@ -1,273 +1,415 @@
-# Scope Estimation & Plan Splitting
+# Scope Estimation & Quality-Driven Plan Splitting
 
-A plan should complete within ~80% of context usage. Beyond that, quality degrades as Claude rushes to finish.
+Plans must maintain consistent quality from first task to last. This requires understanding the **quality degradation curve** and splitting aggressively to stay in the peak quality zone.
 
-## The 80% Rule
+## The Quality Degradation Curve
 
-**Goal:** Each plan uses ≤80% of context window by completion.
+**Critical insight:** Claude doesn't degrade at arbitrary percentages - it degrades when it *perceives* context pressure and enters "completion mode."
 
-**Why:**
-- Consistent quality throughout execution
-- No late-stage compression ("I'll do this more concisely...")
-- Room for iteration and fixes
-- Better git commits (focused, atomic)
+```
+Context Usage  │  Quality Level   │  Claude's Mental State
+─────────────────────────────────────────────────────────
+0-30%          │  ████████ PEAK   │  "I can be thorough and comprehensive"
+               │                  │  No anxiety, full detail, best work
 
-**What happens at >80%:**
-- Claude starts optimizing for completion over quality
-- Later tasks get less thorough implementation
-- Comments/docs get skipped
-- Error handling becomes minimal
-- Tests become perfunctory
+30-50%         │  ██████ GOOD     │  "Still have room, maintaining quality"
+               │                  │  Engaged, confident, solid work
+
+50-70%         │  ███ DEGRADING   │  "Getting tight, need to be efficient"
+               │                  │  Efficiency mode, compression begins
+
+70%+           │  █ POOR          │  "Running out, must finish quickly"
+               │                  │  Self-lobotomization, rushed, minimal
+```
+
+**The 40-50% inflection point:**
+
+This is where quality breaks. Claude sees context mounting and thinks "I'd better conserve now or I won't finish." Result: The classic mid-execution statement "I'll complete the remaining tasks more concisely" = quality crash.
+
+**The fundamental rule:** Stop BEFORE quality degrades, not at context limit.
+
+## Target: 50% Context Maximum
+
+**Plans should complete within ~50% of context usage.**
+
+Why 50% not 80%?
+- Huge safety buffer
+- No context anxiety possible
+- Quality maintained from start to finish
+- Room for unexpected complexity
+- Space for iteration and fixes
+
+**If you target 80%, you're planning for failure.** By the time you hit 80%, you've already spent 40% in degradation mode.
+
+## The 2-3 Task Rule
+
+**Each plan should contain 2-3 tasks maximum.**
+
+Why this number?
+
+**Task 1 (0-15% context):**
+- Fresh context
+- Peak quality
+- Comprehensive implementation
+- Full testing
+- Complete documentation
+
+**Task 2 (15-35% context):**
+- Still in peak zone
+- Quality maintained
+- Buffer feels safe
+- No anxiety
+
+**Task 3 (35-50% context):**
+- Beginning to feel pressure
+- Quality still good but managing it
+- Natural stopping point
+- Better to commit here
+
+**Task 4+ (50%+ context):**
+- DEGRADATION ZONE
+- "I'll do this concisely" appears
+- Quality crashes
+- Should have split before this
+
+**The principle:** Each task is independently committable. 2-3 focused changes per commit creates beautiful, surgical git history.
 
 ## Signals to Split Into Multiple Plans
 
-### Hard Signals (Always Split)
+### Always Split If:
 
-**1. More than 7 tasks**
-- Context will be tight
-- Split into logical groups
+**1. More than 3 tasks**
+- Even if tasks seem small
+- Each additional task increases degradation risk
+- Split into logical groups of 2-3
 
 **2. Multiple subsystems**
-- Database setup + API routes + UI components = 3 plans
-- Each subsystem is a plan
+```
+❌ Bad (1 plan):
+- Database schema (3 files)
+- API routes (5 files)
+- UI components (8 files)
+Total: 16 files, 1 plan → guaranteed degradation
 
-**3. Research + Implementation**
-- Research is one plan (produces FINDINGS.md)
-- Implementation is separate plan (uses FINDINGS.md)
+✅ Good (3 plans):
+- 01-01-PLAN.md: Database schema (3 files, 2 tasks)
+- 01-02-PLAN.md: API routes (5 files, 3 tasks)
+- 01-03-PLAN.md: UI components (8 files, 3 tasks)
+Total: 16 files, 3 plans → consistent quality
+```
 
-**4. Long refactoring**
-- Refactor session will accumulate diffs
-- Split by: file/module boundaries, or logical groupings
+**3. Any task with >5 file modifications**
+- Large tasks burn context fast
+- Split by file groups or logical units
+- Better: 3 plans of 2 files each vs 1 plan of 6 files
 
-**5. Checkpoint-heavy work**
-- If >2 checkpoints in a phase, likely needs multiple plans
-- Group: setup tasks (with checkpoints) → implementation → verification
+**4. Checkpoint + implementation work**
+- Checkpoints require user interaction (context preserved)
+- Implementation after checkpoint should be separate plan
+```
+✅ Good split:
+- 02-01-PLAN.md: Setup (checkpoint: decision on auth provider)
+- 02-02-PLAN.md: Implement chosen auth solution
+```
 
-### Soft Signals (Consider Splitting)
+**5. Research + implementation**
+- Research produces FINDINGS.md (separate plan)
+- Implementation consumes FINDINGS.md (separate plan)
+- Clear boundary, clean handoff
 
-**1. Complex task descriptions**
-- If a task needs 3+ bullet points to explain, it might be its own plan
+### Consider Splitting If:
 
-**2. Uncertainty about approach**
-- "Figure out how to integrate X" + "implement X" = 2 plans
-- Research plan → implementation plan
+**1. Estimated >5 files modified total**
+- Context from reading existing code
+- Context from diffs
+- Context from responses
+- Adds up faster than expected
 
-**3. Natural breakpoints**
+**2. Complex domains (auth, payments, data modeling)**
+- These require careful thinking
+- Burns more context per task than simple CRUD
+- Split more aggressively
+
+**3. Any uncertainty about approach**
+- "Figure out X" phase separate from "implement X" phase
+- Don't mix exploration and implementation
+
+**4. Natural semantic boundaries**
 - Setup → Core → Features
 - Backend → Frontend
-- Local dev → Deployment
+- Configuration → Implementation → Testing
 
-**4. Estimated file count**
-- Creating/modifying >12-15 files? Probably too much for one plan
-
-## How to Split Effectively
+## Splitting Strategies
 
 ### By Subsystem
 
-**Example Phase:** "User Authentication"
+**Phase:** "Authentication System"
 
 **Split:**
-- `01-01-PLAN.md`: Database schema (User table, sessions, migrations)
-- `01-02-PLAN.md`: API routes (signup, login, logout, middleware)
-- `01-03-PLAN.md`: UI components (forms, validation, error handling)
+```
+- 03-01-PLAN.md: Database models (User, Session tables + relations)
+- 03-02-PLAN.md: Auth API (register, login, logout endpoints)
+- 03-03-PLAN.md: Protected routes (middleware, JWT validation)
+- 03-04-PLAN.md: UI components (login form, registration form)
+```
 
-Each plan is independently executable and testable.
+Each plan: 2-3 tasks, single subsystem, clean commits.
 
 ### By Dependency
 
-**Example Phase:** "Payment Integration"
+**Phase:** "Payment Integration"
 
 **Split:**
-- `02-01-PLAN.md`: Stripe setup (account, webhook endpoints, env vars) + CHECKPOINTS
-- `02-02-PLAN.md`: Subscription logic (plans, checkout session, customer portal)
-- `02-03-PLAN.md`: Frontend integration (pricing page, payment flow, success/cancel)
+```
+- 04-01-PLAN.md: Stripe setup (webhook endpoints via API, env vars, test mode)
+- 04-02-PLAN.md: Subscription logic (plans, checkout, customer portal)
+- 04-03-PLAN.md: Frontend integration (pricing page, payment flow)
+```
 
-Later plans depend on earlier plans being complete.
+Later plans depend on earlier completion. Sequential execution, fresh context each time.
 
 ### By Complexity
 
-**Example Phase:** "Dashboard Buildout"
+**Phase:** "Dashboard Buildout"
 
 **Split:**
-- `03-01-PLAN.md`: Layout shell (sidebar, header, routing, responsive structure)
-- `03-02-PLAN.md`: Data visualization (charts, tables, filtering, real-time updates)
-- `03-03-PLAN.md`: User actions (settings, profile, notifications)
+```
+- 05-01-PLAN.md: Layout shell (simple: sidebar, header, routing)
+- 05-02-PLAN.md: Data fetching (moderate: TanStack Query setup, API integration)
+- 05-03-PLAN.md: Data visualization (complex: charts, tables, real-time updates)
+```
 
-Each plan is substantial but focused.
+Complex work gets its own plan with full context budget.
 
-### By Checkpoint Boundaries
+### By Verification Points
 
-**Example Phase:** "Deployment Pipeline"
+**Phase:** "Deployment Pipeline"
 
 **Split:**
-- `04-01-PLAN.md`: Vercel setup + CHECKPOINT (create project, link repo)
-- `04-02-PLAN.md`: Environment config (secrets, env vars, build settings)
-- `04-03-PLAN.md`: CI/CD (GitHub Actions, preview deploys, production checks)
+```
+- 06-01-PLAN.md: Vercel setup (deploy via CLI, configure domains)
+  → Ends with checkpoint:human-verify "check xyz.vercel.app loads"
 
-Checkpoints naturally segment the work.
+- 06-02-PLAN.md: Environment config (secrets via CLI, env vars)
+  → Autonomous (no checkpoints) → subagent execution
+
+- 06-03-PLAN.md: CI/CD (GitHub Actions, preview deploys)
+  → Ends with checkpoint:human-verify "check PR preview works"
+```
+
+Verification checkpoints create natural boundaries. Autonomous plans between checkpoints execute via subagent with fresh context.
+
+## Autonomous vs Interactive Plans
+
+**Critical optimization:** Plans without checkpoints don't need main context.
+
+### Autonomous Plans (No Checkpoints)
+- Contains only `type="auto"` tasks
+- No user interaction needed
+- **Execute via subagent with fresh 200k context**
+- Impossible to degrade (always starts at 0%)
+- Creates SUMMARY, commits, reports back
+- Can run in parallel (multiple subagents)
+
+### Interactive Plans (Has Checkpoints)
+- Contains `checkpoint:human-verify` or `checkpoint:decision` tasks
+- Requires user interaction
+- Must execute in main context
+- Still target 50% context (2-3 tasks)
+
+**Planning guidance:** If splitting a phase, try to:
+- Group autonomous work together (→ subagent)
+- Separate interactive work (→ main context)
+- Maximize autonomous plans (more fresh contexts)
+
+Example:
+```
+Phase: Feature X
+- 07-01-PLAN.md: Backend (autonomous) → subagent
+- 07-02-PLAN.md: Frontend (autonomous) → subagent
+- 07-03-PLAN.md: Integration test (has checkpoint:human-verify) → main context
+```
+
+Two fresh contexts, one interactive verification. Perfect.
+
+## Anti-Patterns
+
+### ❌ The "Comprehensive Plan" Anti-Pattern
+
+```
+Plan: "Complete Authentication System"
+Tasks:
+1. Database models
+2. Migration files
+3. Auth API endpoints
+4. JWT utilities
+5. Protected route middleware
+6. Password hashing
+7. Login form component
+8. Registration form component
+
+Result: 8 tasks, 80%+ context, degradation at task 4-5
+```
+
+**Why this fails:**
+- Task 1-3: Good quality
+- Task 4-5: "I'll do these concisely" = degradation begins
+- Task 6-8: Rushed, minimal, poor quality
+
+### ✅ The "Atomic Plan" Pattern
+
+```
+Split into 4 plans:
+
+Plan 1: "Auth Database Models" (2 tasks)
+- Database schema (User, Session)
+- Migration files
+
+Plan 2: "Auth API Core" (3 tasks)
+- Register endpoint
+- Login endpoint
+- JWT utilities
+
+Plan 3: "Auth API Protection" (2 tasks)
+- Protected route middleware
+- Logout endpoint
+
+Plan 4: "Auth UI Components" (2 tasks)
+- Login form
+- Registration form
+```
+
+**Why this succeeds:**
+- Each plan: 2-3 tasks, 30-40% context
+- All tasks: Peak quality throughout
+- Git history: 4 focused commits
+- Easy to verify each piece
+- Rollback is surgical
+
+### ❌ The "Efficiency Trap" Anti-Pattern
+
+```
+Thinking: "These tasks are small, let's do 6 to be efficient"
+
+Result: Task 1-2 are good, task 3-4 begin degrading, task 5-6 are rushed
+```
+
+**Why this fails:** You're optimizing for fewer plans, not quality. The "efficiency" is false - poor quality requires more rework.
+
+### ✅ The "Quality First" Pattern
+
+```
+Thinking: "These tasks are small, but let's do 2-3 to guarantee quality"
+
+Result: All tasks peak quality, clean commits, no rework needed
+```
+
+**Why this succeeds:** You optimize for quality, which is true efficiency. No rework = faster overall.
 
 ## Estimating Context Usage
 
-**Rough heuristics:**
+**Rough heuristics for plan size:**
 
-| Task Count | Subsystems | Estimated Files | Context Usage | Recommendation |
-|------------|-----------|-----------------|---------------|----------------|
-| 1-3 | 1 | 1-5 | 20-40% | Single plan ✅ |
-| 4-7 | 1-2 | 6-12 | 50-80% | Single plan ✅ |
-| 8-10 | 2-3 | 13-20 | 85-95% | Consider split ⚠️ |
-| 11+ | 3+ | 20+ | >95% | Must split ❌ |
+### File Counts
+- 0-3 files modified: Small task (~10-15% context)
+- 4-6 files modified: Medium task (~20-30% context)
+- 7+ files modified: Large task (~40%+ context) - split this
 
-**Other factors that increase context:**
-- Complex refactoring (large diffs)
-- External API integration (reading docs, testing)
-- New technology (learning curve, experimentation)
-- Debugging sessions (multiple iterations)
+### Complexity
+- Simple CRUD: ~15% per task
+- Business logic: ~25% per task
+- Complex algorithms: ~40% per task
+- Domain modeling: ~35% per task
 
-When in doubt, split. Smaller plans are faster and higher quality.
+### 2-Task Plan (Safe)
+- 2 simple tasks: ~30% total ✅ Plenty of room
+- 2 medium tasks: ~50% total ✅ At target
+- 2 complex tasks: ~80% total ❌ Too tight, split
 
-## What Each Plan Should Accomplish
+### 3-Task Plan (Risky)
+- 3 simple tasks: ~45% total ✅ Good
+- 3 medium tasks: ~75% total ⚠️ Pushing it
+- 3 complex tasks: 120% total ❌ Impossible, split
 
-**Ideal plan characteristics:**
-- **3-6 tasks** - sweet spot for focus
-- **Single subsystem** - cohesive, testable
-- **Clear outcome** - "auth works end-to-end" not "did some auth stuff"
-- **Independent** - can resume from here if needed
-- **Verifiable** - tests pass, feature works, checkpoint approved
+**Conservative principle:** When in doubt, split. Better to have an extra plan than degraded quality.
 
-**Plan too small:**
-- <3 tasks
-- <30 minutes of work
-- Could easily be combined with adjacent plan
+## The Atomic Commit Philosophy
 
-**Plan too large:**
-- >7 tasks
-- >3 subsystems
-- Multiple checkpoints
-- "Implementation" without specificity
+**What we're optimizing for:** Beautiful git history where each commit is:
+- Focused (2-3 related changes)
+- Complete (fully implemented, tested)
+- Documented (clear commit message)
+- Reviewable (small enough to understand)
+- Revertable (surgical rollback possible)
 
-## Multiple Plans in Practice
-
-**Phase structure:**
+**Bad git history (large plans):**
 ```
-phases/01-authentication/
-├── 01-01-PLAN.md          # Database setup
-├── 01-01-SUMMARY.md       # ✅ Complete
-├── 01-02-PLAN.md          # API routes
-├── 01-02-SUMMARY.md       # ✅ Complete
-├── 01-03-PLAN.md          # UI components
-└── (no summary yet)       # ⏳ In progress
+feat(auth): Complete authentication system
+- Added 16 files
+- Modified 8 files
+- 1200 lines changed
+- Contains: models, API, UI, middleware, utilities
 ```
 
-**Roadmap view:**
-```markdown
-## Phase 1: Authentication [IN_PROGRESS]
+Impossible to review, hard to understand, can't revert without losing everything.
 
-Plans:
-- [x] 01-01: Database setup (User table, sessions, migrations)
-- [x] 01-02: API routes (signup, login, logout, auth middleware)
-- [ ] 01-03: UI components (login/signup forms, protected routes)
+**Good git history (atomic plans):**
+```
+feat(auth-01): Add User and Session database models
+- Added schema files
+- Added migration
+- 45 lines changed
 
-Status: 2/3 plans complete
+feat(auth-02): Implement register and login API endpoints
+- Added /api/auth/register
+- Added /api/auth/login
+- Added JWT utilities
+- 120 lines changed
+
+feat(auth-03): Add protected route middleware
+- Added middleware/auth.ts
+- Added tests
+- 60 lines changed
+
+feat(auth-04): Build login and registration forms
+- Added LoginForm component
+- Added RegisterForm component
+- 90 lines changed
 ```
 
-**Execution flow:**
-1. Plan phase → generates 3 plans (01-01, 01-02, 01-03)
-2. Execute 01-01 → summary created
-3. Execute 01-02 → summary created
-4. Execute 01-03 → summary created
-5. Transition → phase marked complete, advance to phase 2
+Each commit tells a story. Each is reviewable. Each is revertable. This is craftsmanship.
 
-## Simple Phases Don't Need Splitting
+## Quality Assurance Through Scope Control
 
-Not every phase needs multiple plans.
+**The guarantee:** When you follow the 2-3 task rule with 50% context target:
 
-**Single-plan phases:**
-- Scaffolding (create Next.js app, initial structure)
-- Deployment (configure Vercel, deploy, test)
-- Simple features (add dark mode toggle)
-- Documentation updates (README, API docs)
+1. **Consistency:** First task has same quality as last task
+2. **Thoroughness:** No "I'll complete X concisely" degradation
+3. **Documentation:** Full context budget for comments/tests
+4. **Error handling:** Space for proper validation and edge cases
+5. **Testing:** Room for comprehensive test coverage
 
-**Indicators of single-plan phase:**
-- 3-5 tasks total
-- Single subsystem
-- Quick setup/config work
-- <2 hours estimated
+**The cost:** More plans to manage.
 
-For these: `01-01-PLAN.md` and `01-01-SUMMARY.md` is fine.
+**The benefit:** Consistent excellence. No rework. Clean history. Maintainable code.
 
-## Dealing with Uncertainty
-
-**When scope is unclear:**
-
-1. **Research plan first:**
-   ```
-   01-01-PLAN.md: Research user sync approaches
-   01-02-PLAN.md: Implement chosen approach (depends on 01-01 findings)
-   ```
-
-2. **Defer decision:**
-   ```
-   Create roadmap with: "Phase 2: User Sync (1-3 plans, TBD after research)"
-   Update roadmap after research with actual plan breakdown
-   ```
-
-3. **Over-estimate splits:**
-   ```
-   Better to have 4 small plans that finish fast
-   Than 1 large plan that struggles to complete
-   ```
-
-## Examples
-
-### Good: E-commerce Product Catalog
-
-**Phase 3: Product Catalog**
-
-**Split:**
-- `03-01-PLAN.md` (4 tasks):
-  - Product schema (table, variants, inventory)
-  - Database migration
-  - Seed sample products
-  - Basic queries
-
-- `03-02-PLAN.md` (5 tasks):
-  - API routes (GET /products, GET /products/:id, filters)
-  - Pagination logic
-  - Search implementation
-  - Tests for API
-  - OpenAPI documentation
-
-- `03-03-PLAN.md` (4 tasks):
-  - Product list UI (grid, filters, sorting)
-  - Product detail page
-  - Search UI component
-  - Loading/error states
-
-Each plan: single subsystem, clear outcome, verifiable independently.
-
-### Bad: Mega-Plan
-
-**Phase 3: Product Catalog**
-
-**Single plan with 13 tasks:**
-- Database schema
-- Migration
-- Seeding
-- API routes (5 endpoints)
-- Pagination
-- Search
-- Tests
-- Product grid UI
-- Product detail UI
-- Search UI
-- Loading states
-
-This will hit 95%+ context. Tasks 9-13 will get rushed implementation.
+**The trade-off is worth it.**
 
 ## Summary
 
-- Aim for 80% context usage maximum
-- Split when: >7 tasks, multiple subsystems, research+implementation, checkpoint-heavy
-- Each plan should be focused, independently executable, and verifiable
-- Use naming: `{phase}-{plan}-PLAN.md` for clarity
-- When uncertain, split - smaller plans execute faster with higher quality
+**Old way (3-6 tasks, 80% target):**
+- Tasks 1-2: Good
+- Tasks 3-4: Degrading
+- Tasks 5-6: Poor
+- Git: Large, unreviewable commits
+- Quality: Inconsistent
+
+**New way (2-3 tasks, 50% target):**
+- All tasks: Peak quality
+- Git: Atomic, surgical commits
+- Quality: Consistent excellence
+- Autonomous plans: Subagent execution (fresh context)
+
+**The principle:** Aggressive atomicity. More plans, smaller scope, consistent quality.
+
+**The rule:** If in doubt, split. Quality over consolidation. Always.

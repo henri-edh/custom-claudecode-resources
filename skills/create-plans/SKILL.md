@@ -25,35 +25,52 @@ When planning a phase, you are writing the prompt that will execute it.
 </principle>
 
 <principle name="scope_control">
-Plans should complete within ~80% of context usage maximum.
+Plans must complete within ~50% of context usage to maintain consistent quality.
 
-Beyond 80%, Claude begins optimizing for completion over quality. Late tasks get rushed, compressed, or skipped.
+**The quality degradation curve:**
+- 0-30% context: Peak quality (comprehensive, thorough, no anxiety)
+- 30-50% context: Good quality (engaged, manageable pressure)
+- 50-70% context: Degrading quality (efficiency mode, compression)
+- 70%+ context: Poor quality (self-lobotomization, rushed work)
 
-**Solution:** Split large phases into multiple focused plans using `{phase}-{plan}-PLAN.md` naming.
+**Critical insight:** Claude doesn't degrade at 80% - it degrades at ~40-50% when it sees context mounting and enters "completion mode." By 80%, quality has already crashed.
+
+**Solution:** Aggressive atomicity - split phases into many small, focused plans.
 
 Examples:
-- `01-01-PLAN.md` - Phase 1, Plan 1 (database setup)
-- `01-02-PLAN.md` - Phase 1, Plan 2 (API routes)
-- `01-03-PLAN.md` - Phase 1, Plan 3 (UI components)
+- `01-01-PLAN.md` - Phase 1, Plan 1 (2-3 tasks: database schema only)
+- `01-02-PLAN.md` - Phase 1, Plan 2 (2-3 tasks: database client setup)
+- `01-03-PLAN.md` - Phase 1, Plan 3 (2-3 tasks: API routes)
+- `01-04-PLAN.md` - Phase 1, Plan 4 (2-3 tasks: UI components)
 
-Each plan is independently executable, verifiable, and scoped to 3-6 tasks.
+Each plan is independently executable, verifiable, and scoped to **2-3 tasks maximum**.
+
+**Atomic task principle:** Better to have 10 small, high-quality plans than 3 large, degraded plans. Each commit should be surgical, focused, and maintainable.
+
+**Autonomous execution:** Plans without checkpoints execute via subagent with fresh context - impossible to degrade.
 
 See: references/scope-estimation.md
 </principle>
 
 <principle name="human_checkpoints">
-Some tasks require human involvement. Checkpoints formalize these interaction points.
+**Claude automates everything that has a CLI or API.** Checkpoints are for verification and decisions, not manual work.
 
 **Checkpoint types:**
-- `checkpoint:human-action` - Human creates external resource (Upstash DB, API keys)
-- `checkpoint:human-verify` - Human verifies Claude's work (UI, UX, visual checks)
+- `checkpoint:human-verify` - Human confirms Claude's automated work (visual checks, UI verification)
 - `checkpoint:decision` - Human makes implementation choice (auth provider, architecture)
 
-All checkpoints are `gate="blocking"` - execution stops until human responds.
+**Rarely needed:** `checkpoint:human-action` - Only for actions with no CLI/API (email verification links, account approvals requiring web login with 2FA)
 
-**Protocol:** Claude reaches checkpoint → stops → presents clear instructions → waits → verifies → resumes
+**Critical rule:** If Claude CAN do it via CLI/API/tool, Claude MUST do it. Never ask human to:
+- Deploy to Vercel/Railway/Fly (use CLI)
+- Create Stripe webhooks (use CLI/API)
+- Run builds/tests (use Bash)
+- Write .env files (use Write tool)
+- Create database resources (use provider CLI)
 
-See: references/checkpoints.md
+**Protocol:** Claude automates work → reaches checkpoint:human-verify → presents what was done → waits for confirmation → resumes
+
+See: references/checkpoints.md, references/cli-automation.md
 </principle>
 
 <principle name="deviation_rules">
@@ -206,6 +223,7 @@ If user's request contains domain keywords, INFER the domain:
 | "MIDI", "MIDI tool", "sequencer", "MIDI controller", "music app", "MIDI 2.0", "MPE", "SysEx" | expertise/midi |
 | "Agent SDK", "Claude SDK", "agentic app" | expertise/with-agent-sdk |
 | "Python automation", "workflow", "API integration", "webhooks", "Celery", "Airflow", "Prefect" | expertise/python-workflow-automation |
+| "UI", "design", "frontend", "interface", "responsive", "visual design", "landing page", "website design", "Tailwind", "CSS", "web design" | expertise/ui-design |
 
 If domain inferred, confirm:
 ```
@@ -226,7 +244,8 @@ Available domain expertise:
 3. unity-games - Unity game development
 4. swift-midi-apps - MIDI/audio apps
 5. with-agent-sdk - Claude Agent SDK apps
-[... any others found in build/]
+6. ui-design - Stunning UI/UX design & frontend development
+[... any others found in expertise/]
 
 N. None - proceed without domain expertise
 C. Create domain skill first

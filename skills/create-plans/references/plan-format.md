@@ -41,11 +41,20 @@ Output: [...]
   <done>[criteria]</done>
 </task>
 
-<task type="checkpoint:human-action" gate="blocking">
-  <action>[what human must do]</action>
-  <instructions>[numbered steps]</instructions>
-  <verification>[what Claude can check afterward]</verification>
-  <resume-signal>[how to continue]</resume-signal>
+<task type="checkpoint:human-verify" gate="blocking">
+  <what-built>[what Claude automated]</what-built>
+  <how-to-verify>[numbered verification steps]</how-to-verify>
+  <resume-signal>[how to continue - "approved" or describe issues]</resume-signal>
+</task>
+
+<task type="checkpoint:decision" gate="blocking">
+  <decision>[what needs deciding]</decision>
+  <context>[why this matters]</context>
+  <options>
+    <option id="option-a"><name>[Name]</name><pros>[pros]</pros><cons>[cons]</cons></option>
+    <option id="option-b"><name>[Name]</name><pros>[pros]</pros><cons>[cons]</cons></option>
+  </options>
+  <resume-signal>[how to indicate choice]</resume-signal>
 </task>
 </tasks>
 
@@ -130,28 +139,28 @@ Use for: Everything Claude can do independently (code, tests, builds, file opera
 </type>
 
 <type name="checkpoint:human-action">
-**Human must perform external action** - Claude cannot access external resources.
+**RARELY USED** - Only for actions with NO CLI/API. Claude automates everything possible first.
 
 **Structure:**
 ```xml
 <task type="checkpoint:human-action" gate="blocking">
-  <action>Create Upstash Redis database</action>
+  <action>[Unavoidable manual step - email link, 2FA code]</action>
   <instructions>
-    1. Visit console.upstash.com
-    2. Click "Create Database" → Redis
-    3. Name: myapp-prod-cache
-    4. Region: US-East-1
-    5. Copy UPSTASH_REDIS_REST_URL from dashboard
-    6. Add to .env: UPSTASH_REDIS_REST_URL=https://...
+    [What Claude already automated]
+    [The ONE thing requiring human action]
   </instructions>
-  <verification>Check .env file contains UPSTASH_REDIS_REST_URL</verification>
-  <resume-signal>Type "done" when complete</resume-signal>
+  <verification>[What Claude can check afterward]</verification>
+  <resume-signal>[How to continue]</resume-signal>
 </task>
 ```
 
-Use for: Creating cloud resources, generating API keys, configuring external services, manual deployments.
+Use ONLY for: Email verification links, SMS 2FA codes, manual approvals with no API, 3D Secure payment flows.
 
-**Execution:** Claude stops, presents instructions, waits for user confirmation, verifies if possible, then resumes.
+Do NOT use for: Anything with a CLI (Vercel, Stripe, Upstash, Railway, GitHub), builds, tests, file creation, deployments.
+
+See: references/cli-automation.md for what Claude can automate.
+
+**Execution:** Claude automates everything with CLI/API, stops only for truly unavoidable manual steps.
 </type>
 
 <type name="checkpoint:human-verify">
@@ -213,14 +222,17 @@ Use for: Technology selection, architecture decisions, design choices, feature p
 </type>
 
 **When to use checkpoints:**
-- External resource creation → `checkpoint:human-action`
-- Visual/UX verification → `checkpoint:human-verify`
+- Visual/UX verification (after Claude builds) → `checkpoint:human-verify`
 - Implementation direction choice → `checkpoint:decision`
+- Truly unavoidable manual actions (email links, 2FA) → `checkpoint:human-action` (rare)
 
 **When NOT to use checkpoints:**
-- Things Claude can verify programmatically → `type="auto"` with verify command
-- File operations → `type="auto"`
-- Tests, builds, type checking → `type="auto"`
+- Anything with CLI/API (Claude automates it) → `type="auto"`
+- Deployments (Vercel, Railway, Fly) → `type="auto"` with CLI
+- Creating resources (Upstash, Stripe, GitHub) → `type="auto"` with CLI/API
+- File operations, tests, builds → `type="auto"`
+
+**Golden rule:** If Claude CAN automate it, Claude MUST automate it. See: references/cli-automation.md
 
 See `references/checkpoints.md` for comprehensive checkpoint guidance.
 </task_types>

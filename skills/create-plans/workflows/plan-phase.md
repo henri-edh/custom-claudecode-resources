@@ -68,7 +68,7 @@ cat package.json 2>/dev/null | head -20
 Decompose the phase into tasks.
 
 Each task must have:
-- **Type**: auto, checkpoint:human-action, checkpoint:human-verify, checkpoint:decision
+- **Type**: auto, checkpoint:human-verify, checkpoint:decision (human-action rarely needed)
 - **Task name**: Clear, action-oriented
 - **Files**: Which files created/modified (for auto tasks)
 - **Action**: Specific implementation (including what to avoid and WHY)
@@ -76,54 +76,67 @@ Each task must have:
 - **Done**: Acceptance criteria
 
 **Identify checkpoints:**
-- External resources to create? → checkpoint:human-action
-- UI/UX to verify visually? → checkpoint:human-verify
+- Claude automated work needing visual/functional verification? → checkpoint:human-verify
 - Implementation choices to make? → checkpoint:decision
+- Truly unavoidable manual action (email link, 2FA)? → checkpoint:human-action (rare)
 
-See references/checkpoints.md for checkpoint structure.
+**Critical:** If external resource has CLI/API (Vercel, Stripe, Upstash, GitHub, etc.), use type="auto" to automate it. Only checkpoint for verification AFTER automation.
+
+See references/checkpoints.md and references/cli-automation.md for checkpoint structure and automation guidance.
 </step>
 
 <step name="estimate_scope">
-After breaking into tasks, assess scope:
+After breaking into tasks, assess scope against the **quality degradation curve**.
 
-**Signals to split into multiple plans:**
-- >7 tasks total
-- Multiple subsystems (DB + API + UI)
-- Multiple checkpoints (>2)
-- Research + implementation mix
-- Expected file count >15
+**ALWAYS split if:**
+- >3 tasks total
+- Multiple subsystems (DB + API + UI = separate plans)
+- >5 files modified in any single task
+- Complex domains (auth, payments, data modeling)
 
-**If scope is appropriate (3-6 tasks, single subsystem):**
+**Aggressive atomicity principle:** Better to have 10 small, high-quality plans than 3 large, degraded plans.
+
+**If scope is appropriate (2-3 tasks, single subsystem, <5 files per task):**
 Proceed to confirm_breakdown for a single plan.
 
-**If scope is large:**
+**If scope is large (>3 tasks):**
 Split into multiple plans by:
-- Subsystem (01-01: Database, 01-02: API, 01-03: UI)
-- Dependency (01-01: Setup + checkpoints, 01-02: Core, 01-03: Features)
-- Complexity (01-01: Layout shell, 01-02: Data viz, 01-03: User actions)
+- Subsystem (01-01: Database, 01-02: API, 01-03: UI, 01-04: Frontend)
+- Dependency (01-01: Setup, 01-02: Core, 01-03: Features, 01-04: Testing)
+- Complexity (01-01: Layout, 01-02: Data fetch, 01-03: Visualization)
+- Autonomous vs Interactive (group auto tasks for subagent execution)
 
-Each plan should be 3-6 tasks, ~80% context usage maximum.
+**Each plan must be:**
+- 2-3 tasks maximum
+- ~50% context target (not 80%)
+- Independently committable
 
-See references/scope-estimation.md for splitting guidance.
+**Autonomous plan optimization:**
+- Plans with NO checkpoints → will execute via subagent (fresh context)
+- Plans with checkpoints → execute in main context (user interaction required)
+- Try to group autonomous work together for maximum fresh contexts
+
+See references/scope-estimation.md for complete splitting guidance and quality degradation analysis.
 </step>
 
 <step name="confirm_breakdown">
 Present the breakdown inline:
 
-**If single plan (3-6 tasks):**
+**If single plan (2-3 tasks):**
 ```
 Here's the proposed breakdown for Phase [X]:
 
 ### Tasks (single plan: {phase}-01-PLAN.md)
 1. [Task name] - [brief description] [type: auto/checkpoint]
 2. [Task name] - [brief description] [type: auto/checkpoint]
-3. [Task name] - [brief description] [type: auto/checkpoint]
-...
+[3. [Task name] - [brief description] [type: auto/checkpoint]] (optional 3rd task if small)
+
+Autonomous: [yes/no] (no checkpoints = subagent execution with fresh context)
 
 Does this breakdown look right? (yes / adjust / start over)
 ```
 
-**If multiple plans (>7 tasks or multiple subsystems):**
+**If multiple plans (>3 tasks or multiple subsystems):**
 ```
 Here's the proposed breakdown for Phase [X]:
 

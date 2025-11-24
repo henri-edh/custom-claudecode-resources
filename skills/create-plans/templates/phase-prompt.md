@@ -44,15 +44,30 @@ Output: [What artifacts will be created]
   <done>[Measurable acceptance criteria]</done>
 </task>
 
-<task type="checkpoint:human-action" gate="blocking">
-  <action>[What human must do externally]</action>
-  <instructions>
-    1. [Specific step with exact URL/command]
-    2. [Next step]
-    3. [Final step - where to save result]
-  </instructions>
-  <verification>[What Claude can check afterward - file exists, env var set]</verification>
-  <resume-signal>[How user indicates completion - "done", "paste URL", etc.]</resume-signal>
+<task type="auto">
+  <name>Task 2: [Action-oriented name]</name>
+  <files>path/to/file.ext</files>
+  <action>[Specific implementation]</action>
+  <verify>[Command or check]</verify>
+  <done>[Acceptance criteria]</done>
+</task>
+
+<task type="checkpoint:decision" gate="blocking">
+  <decision>[What needs deciding]</decision>
+  <context>[Why this decision matters]</context>
+  <options>
+    <option id="option-a">
+      <name>[Option name]</name>
+      <pros>[Benefits and advantages]</pros>
+      <cons>[Tradeoffs and limitations]</cons>
+    </option>
+    <option id="option-b">
+      <name>[Option name]</name>
+      <pros>[Benefits and advantages]</pros>
+      <cons>[Tradeoffs and limitations]</cons>
+    </option>
+  </options>
+  <resume-signal>[How to indicate choice - "Select: option-a or option-b"]</resume-signal>
 </task>
 
 <task type="auto">

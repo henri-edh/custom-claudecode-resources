@@ -36,6 +36,269 @@ Proceed with execution?
 ```
 </step>
 
+<step name="parse_segments">
+**Intelligent segmentation: Parse plan into execution segments.**
+
+Plans are divided into segments by checkpoints. Each segment is routed to optimal execution context (subagent or main).
+
+**1. Check for checkpoints:**
+```bash
+# Find all checkpoints and their types
+grep -n "type=\"checkpoint" .planning/phases/XX-name/{phase}-{plan}-PLAN.md
+```
+
+**2. Analyze execution strategy:**
+
+**If NO checkpoints found:**
+- **Fully autonomous plan** - spawn single subagent for entire plan
+- Subagent gets fresh 200k context, executes all tasks, creates SUMMARY, commits
+- Main context: Just orchestration (~5% usage)
+
+**If checkpoints found, parse into segments:**
+
+Segment = tasks between checkpoints (or start→first checkpoint, or last checkpoint→end)
+
+**For each segment, determine routing:**
+
+```
+Segment routing rules:
+
+IF segment has no prior checkpoint:
+  → SUBAGENT (first segment, nothing to depend on)
+
+IF segment follows checkpoint:human-verify:
+  → SUBAGENT (verification is just confirmation, doesn't affect next work)
+
+IF segment follows checkpoint:decision OR checkpoint:human-action:
+  → MAIN CONTEXT (next tasks need the decision/result)
+```
+
+**3. Execution pattern:**
+
+**Pattern A: Fully autonomous (no checkpoints)**
+```
+Spawn subagent → execute all tasks → SUMMARY → commit → report back
+```
+
+**Pattern B: Segmented with verify-only checkpoints**
+```
+Segment 1 (tasks 1-3): Spawn subagent → execute → report back
+Checkpoint 4 (human-verify): Main context → you verify → continue
+Segment 2 (tasks 5-6): Spawn NEW subagent → execute → report back
+Checkpoint 7 (human-verify): Main context → you verify → continue
+Aggregate results → SUMMARY → commit
+```
+
+**Pattern C: Decision-dependent (must stay in main)**
+```
+Checkpoint 1 (decision): Main context → you decide → continue in main
+Tasks 2-5: Main context (need decision from checkpoint 1)
+No segmentation benefit - execute entirely in main
+```
+
+**4. Why this works:**
+
+**Segmentation benefits:**
+- Fresh context for each autonomous segment (0% start every time)
+- Main context only for checkpoints (~10-20% total)
+- Can handle 10+ task plans if properly segmented
+- Quality impossible to degrade in autonomous segments
+
+**When segmentation provides no benefit:**
+- Checkpoint is decision/human-action and following tasks depend on outcome
+- Better to execute sequentially in main than break flow
+
+**5. Implementation:**
+
+**For fully autonomous plans:**
+```
+Use Task tool with subagent_type="general-purpose":
+
+Prompt: "Execute plan at .planning/phases/{phase}-{plan}-PLAN.md
+
+This is an autonomous plan (no checkpoints). Execute all tasks, create SUMMARY.md in phase directory, commit with message following plan's commit guidance.
+
+Follow all deviation rules and authentication gate protocols from the plan.
+
+When complete, report: plan name, tasks completed, SUMMARY path, commit hash."
+```
+
+**For segmented plans (has verify-only checkpoints):**
+```
+Execute segment-by-segment:
+
+For each autonomous segment:
+  Spawn subagent with prompt: "Execute tasks [X-Y] from plan at .planning/phases/{phase}-{plan}-PLAN.md. Read the plan for full context and deviation rules. Do NOT create SUMMARY or commit - just execute these tasks and report results."
+
+  Wait for subagent completion
+
+For each checkpoint:
+  Execute in main context
+  Wait for user interaction
+  Continue to next segment
+
+After all segments complete:
+  Aggregate all results
+  Create SUMMARY.md
+  Commit with all changes
+```
+
+**For decision-dependent plans:**
+```
+Execute in main context (standard flow below)
+No subagent routing
+Quality maintained through small scope (2-3 tasks per plan)
+```
+
+See step name="segment_execution" for detailed segment execution loop.
+</step>
+
+<step name="segment_execution">
+**Detailed segment execution loop for segmented plans.**
+
+**This step applies ONLY to segmented plans (Pattern B: has checkpoints, but they're verify-only).**
+
+For Pattern A (fully autonomous) and Pattern C (decision-dependent), skip this step.
+
+**Execution flow:**
+
+```
+1. Parse plan to identify segments:
+   - Read plan file
+   - Find checkpoint locations: grep -n "type=\"checkpoint" PLAN.md
+   - Identify checkpoint types: grep "type=\"checkpoint" PLAN.md | grep -o 'checkpoint:[^"]*'
+   - Build segment map:
+     * Segment 1: Start → first checkpoint (tasks 1-X)
+     * Checkpoint 1: Type and location
+     * Segment 2: After checkpoint 1 → next checkpoint (tasks X+1 to Y)
+     * Checkpoint 2: Type and location
+     * ... continue for all segments
+
+2. For each segment in order:
+
+   A. Determine routing (apply rules from parse_segments):
+      - No prior checkpoint? → Subagent
+      - Prior checkpoint was human-verify? → Subagent
+      - Prior checkpoint was decision/human-action? → Main context
+
+   B. If routing = Subagent:
+      ```
+      Spawn Task tool with subagent_type="general-purpose":
+
+      Prompt: "Execute tasks [task numbers/names] from plan at [plan path].
+
+      **Context:**
+      - Read the full plan for objective, context files, and deviation rules
+      - You are executing a SEGMENT of this plan (not the full plan)
+      - Other segments will be executed separately
+
+      **Your responsibilities:**
+      - Execute only the tasks assigned to you
+      - Follow all deviation rules and authentication gate protocols
+      - Track deviations for later Summary
+      - DO NOT create SUMMARY.md (will be created after all segments complete)
+      - DO NOT commit (will be done after all segments complete)
+
+      **Report back:**
+      - Tasks completed
+      - Files created/modified
+      - Deviations encountered
+      - Any issues or blockers"
+
+      Wait for subagent to complete
+      Capture results (files changed, deviations, etc.)
+      ```
+
+   C. If routing = Main context:
+      Execute tasks in main using standard execution flow (step name="execute")
+      Track results locally
+
+   D. After segment completes (whether subagent or main):
+      Continue to next checkpoint/segment
+
+3. After ALL segments complete:
+
+   A. Aggregate results from all segments:
+      - Collect files created/modified from all segments
+      - Collect deviations from all segments
+      - Collect decisions from all checkpoints
+      - Merge into complete picture
+
+   B. Create SUMMARY.md:
+      - Use aggregated results
+      - Document all work from all segments
+      - Include deviations from all segments
+      - Note which segments were subagented
+
+   C. Commit:
+      - Stage all files from all segments
+      - Stage SUMMARY.md
+      - Commit with message following plan guidance
+      - Include note about segmented execution if relevant
+
+   D. Report completion
+
+**Example execution trace:**
+
+```
+Plan: 01-02-PLAN.md (8 tasks, 2 verify checkpoints)
+
+Parsing segments...
+- Segment 1: Tasks 1-3 (autonomous)
+- Checkpoint 4: human-verify
+- Segment 2: Tasks 5-6 (autonomous)
+- Checkpoint 7: human-verify
+- Segment 3: Task 8 (autonomous)
+
+Routing analysis:
+- Segment 1: No prior checkpoint → SUBAGENT ✓
+- Checkpoint 4: Verify only → MAIN (required)
+- Segment 2: After verify → SUBAGENT ✓
+- Checkpoint 7: Verify only → MAIN (required)
+- Segment 3: After verify → SUBAGENT ✓
+
+Execution:
+[1] Spawning subagent for tasks 1-3...
+    → Subagent completes: 3 files modified, 0 deviations
+[2] Executing checkpoint 4 (human-verify)...
+    ════════════════════════════════════════
+    CHECKPOINT: Verification Required
+    Task 4 of 8: Verify database schema
+    I built: User and Session tables with relations
+    How to verify: Check src/db/schema.ts for correct types
+    ════════════════════════════════════════
+    User: "approved"
+[3] Spawning subagent for tasks 5-6...
+    → Subagent completes: 2 files modified, 1 deviation (added error handling)
+[4] Executing checkpoint 7 (human-verify)...
+    User: "approved"
+[5] Spawning subagent for task 8...
+    → Subagent completes: 1 file modified, 0 deviations
+
+Aggregating results...
+- Total files: 6 modified
+- Total deviations: 1
+- Segmented execution: 3 subagents, 2 checkpoints
+
+Creating SUMMARY.md...
+Committing...
+✓ Complete
+```
+
+**Benefits of this pattern:**
+- Main context usage: ~20% (just orchestration + checkpoints)
+- Subagent 1: Fresh 0-30% (tasks 1-3)
+- Subagent 2: Fresh 0-30% (tasks 5-6)
+- Subagent 3: Fresh 0-20% (task 8)
+- All autonomous work: Peak quality
+- Can handle large plans with many tasks if properly segmented
+
+**When NOT to use segmentation:**
+- Plan has decision/human-action checkpoints that affect following tasks
+- Following tasks depend on checkpoint outcome
+- Better to execute in main sequentially in those cases
+</step>
+
 <step name="load_prompt">
 Read the plan prompt:
 ```bash
@@ -73,6 +336,7 @@ Execute each task in the prompt. **Deviations are normal** - handle them automat
 
    **If `type="auto"`:**
    - Work toward task completion
+   - **If CLI/API returns authentication error:** Handle as authentication gate (see below)
    - **When you discover additional work not in plan:** Apply deviation rules (see below) automatically
    - Continue implementing, applying rules as needed
    - Run the verification
@@ -91,6 +355,148 @@ Execute each task in the prompt. **Deviations are normal** - handle them automat
 4. Confirm all success criteria from `<success_criteria>` section met
 5. Document all deviations in Summary (automatic - see deviation_documentation below)
 </step>
+
+<authentication_gates>
+## Handling Authentication Errors During Execution
+
+**When you encounter authentication errors during `type="auto"` task execution:**
+
+This is NOT a failure. Authentication gates are expected and normal. Handle them dynamically:
+
+**Authentication error indicators:**
+- CLI returns: "Error: Not authenticated", "Not logged in", "Unauthorized", "401", "403"
+- API returns: "Authentication required", "Invalid API key", "Missing credentials"
+- Command fails with: "Please run {tool} login" or "Set {ENV_VAR} environment variable"
+
+**Authentication gate protocol:**
+
+1. **Recognize it's an auth gate** - Not a bug, just needs credentials
+2. **STOP current task execution** - Don't retry repeatedly
+3. **Create dynamic checkpoint:human-action** - Present it to user immediately
+4. **Provide exact authentication steps** - CLI commands, where to get keys
+5. **Wait for user to authenticate** - Let them complete auth flow
+6. **Verify authentication works** - Test that credentials are valid
+7. **Retry the original task** - Resume automation where you left off
+8. **Continue normally** - Don't treat this as an error in Summary
+
+**Example: Vercel deployment hits auth error**
+
+```
+Task 3: Deploy to Vercel
+Running: vercel --yes
+
+Error: Not authenticated. Please run 'vercel login'
+
+[Create checkpoint dynamically]
+
+════════════════════════════════════════
+CHECKPOINT: Authentication Required
+════════════════════════════════════════
+
+Task 3 of 8: Authenticate Vercel CLI
+
+I tried to deploy but got authentication error.
+
+What you need to do:
+Run: vercel login
+
+This will open your browser - complete the authentication flow.
+
+I'll verify after: vercel whoami returns your account
+
+Type "done" when authenticated
+════════════════════════════════════════
+
+[Wait for user response]
+
+[User types "done"]
+
+Verifying authentication...
+Running: vercel whoami
+✓ Authenticated as: user@example.com
+
+Retrying deployment...
+Running: vercel --yes
+✓ Deployed to: https://myapp-abc123.vercel.app
+
+Task 3 complete. Continuing to task 4...
+```
+
+**Example: Stripe API needs key**
+
+```
+Task 5: Create Stripe webhook endpoint
+Using Stripe API...
+
+Error: 401 Unauthorized - No API key provided
+
+[Create checkpoint dynamically]
+
+════════════════════════════════════════
+CHECKPOINT: Credentials Required
+════════════════════════════════════════
+
+Task 5 of 8: Provide Stripe API key
+
+I tried to create webhook but need your Stripe API key.
+
+What you need to do:
+1. Visit dashboard.stripe.com/apikeys
+2. Copy your "Secret key" (starts with sk_test_ or sk_live_)
+3. Paste it here, or run: export STRIPE_SECRET_KEY=sk_...
+
+I'll verify after: Stripe API call succeeds
+
+Type "done" when ready, or paste the key
+════════════════════════════════════════
+
+[Wait for user response]
+
+[User pastes key or exports env var]
+
+Saving key to .env...
+Verifying Stripe API access...
+✓ Stripe API authenticated
+
+Retrying webhook creation...
+✓ Webhook endpoint created: whsec_abc123
+
+Task 5 complete. Continuing to task 6...
+```
+
+**In Summary documentation:**
+
+Document authentication gates as normal flow, not deviations:
+
+```markdown
+## Authentication Gates
+
+During execution, I encountered authentication requirements:
+
+1. Task 3: Vercel CLI required authentication
+   - Paused for `vercel login`
+   - Resumed after authentication
+   - Deployed successfully
+
+2. Task 5: Stripe API required API key
+   - Paused for API key input
+   - Saved to .env
+   - Resumed webhook creation
+
+These are normal gates, not errors.
+```
+
+**Key principles:**
+- Authentication gates are NOT failures or bugs
+- They're expected interaction points during first-time setup
+- Handle them gracefully and continue automation after unblocked
+- Don't mark tasks as "failed" or "incomplete" due to auth gates
+- Document them as normal flow, separate from deviations
+
+See references/cli-automation.md "Authentication Gates" section for complete examples.
+</authentication_gates>
+
+<step name="execute">
 
 <deviation_rules>
 ## Automatic Deviation Handling
@@ -366,7 +772,9 @@ Logged to .planning/ISSUES.md for future consideration:
 </deviation_documentation>
 
 <step name="checkpoint_protocol">
-When encountering `type="checkpoint:human-action"`, `type="checkpoint:human-verify"`, or `type="checkpoint:decision"`:
+When encountering `type="checkpoint:*"`:
+
+**Critical: Claude automates everything with CLI/API before checkpoints.** Checkpoints are for verification and decisions, not manual work.
 
 **Display checkpoint clearly:**
 ```
@@ -382,35 +790,23 @@ Task [X] of [Y]: [Action/What-Built/Decision]
 ════════════════════════════════════════
 ```
 
-**For checkpoint:human-action:**
+**For checkpoint:human-verify (90% of checkpoints):**
 ```
-Instructions:
-1. [Step 1]
-2. [Step 2]
-3. [Step 3]
-
-I'll verify after: [verification]
-
-[Resume signal - e.g., "Type 'done' when complete"]
-```
-
-**For checkpoint:human-verify:**
-```
-I just built: [what-built]
+I automated: [what was automated - deployed, built, configured]
 
 How to verify:
-1. [Step 1]
-2. [Step 2]
-3. [Step 3]
+1. [Step 1 - exact command/URL]
+2. [Step 2 - what to check]
+3. [Step 3 - expected behavior]
 
 [Resume signal - e.g., "Type 'approved' or describe issues"]
 ```
 
-**For checkpoint:decision:**
+**For checkpoint:decision (9% of checkpoints):**
 ```
 Decision needed: [decision]
 
-Context: [context]
+Context: [why this matters]
 
 Options:
 1. [option-id]: [name]
@@ -424,12 +820,28 @@ Options:
 [Resume signal - e.g., "Select: option-id"]
 ```
 
+**For checkpoint:human-action (1% - rare, only for truly unavoidable manual steps):**
+```
+I automated: [what Claude already did via CLI/API]
+
+Need your help with: [the ONE thing with no CLI/API - email link, 2FA code]
+
+Instructions:
+[Single unavoidable step]
+
+I'll verify after: [verification]
+
+[Resume signal - e.g., "Type 'done' when complete"]
+```
+
 **After displaying:** WAIT for user response. Do NOT hallucinate completion. Do NOT continue to next task.
 
 **After user responds:**
-- Run verification if specified (file exists, env var set, etc.)
+- Run verification if specified (file exists, env var set, tests pass, etc.)
 - If verification passes or N/A: continue to next task
 - If verification fails: inform user, wait for resolution
+
+See references/checkpoints.md and references/cli-automation.md for complete checkpoint guidance.
 </step>
 
 <step name="verification_failure_gate">

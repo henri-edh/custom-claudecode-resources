@@ -2,7 +2,13 @@
 name: run-prompt
 description: Delegate one or more prompts to fresh sub-task contexts with parallel or sequential execution
 argument-hint: <prompt-number(s)-or-name> [--parallel|--sequential]
+allowed-tools: [Read, Task, Bash(ls:*), Bash(mv:*), Bash(git:*)]
 ---
+
+<context>
+Git status: !`git status --short`
+Recent prompts: !`ls -t ./prompts/*.md | head -5`
+</context>
 
 <objective>
 Execute one or more prompts from `./prompts/` as delegated sub-tasks with fresh context. Supports single prompt execution, parallel execution of multiple independent prompts, and sequential execution of dependent prompts.
@@ -60,7 +66,11 @@ For each prompt number/name:
 2. Delegate as sub-task using Task tool with subagent_type="general-purpose"
 3. Wait for completion
 4. Archive prompt to `./prompts/completed/` with metadata
-5. Return results
+5. Commit all work:
+   - Stage files YOU modified with `git add [file]` (never `git add .`)
+   - Determine appropriate commit type based on changes (fix|feat|refactor|style|docs|test|chore)
+   - Commit with format: `[type]: [description]` (lowercase, specific, concise)
+6. Return results
    </single_prompt>
 
 <parallel_execution>
@@ -75,7 +85,11 @@ For each prompt number/name:
    </example>
 3. Wait for ALL to complete
 4. Archive all prompts with metadata
-5. Return consolidated results
+5. Commit all work:
+   - Stage files YOU modified with `git add [file]` (never `git add .`)
+   - Determine appropriate commit type based on changes (fix|feat|refactor|style|docs|test|chore)
+   - Commit with format: `[type]: [description]` (lowercase, specific, concise)
+6. Return consolidated results
    </parallel_execution>
 
 <sequential_execution>
@@ -89,7 +103,12 @@ For each prompt number/name:
 7. Wait for completion
 8. Archive second prompt
 9. Repeat for remaining prompts
-10. Return consolidated results
+10. Archive all prompts with metadata
+11. Commit all work:
+    - Stage files YOU modified with `git add [file]` (never `git add .`)
+    - Determine appropriate commit type based on changes (fix|feat|refactor|style|docs|test|chore)
+    - Commit with format: `[type]: [description]` (lowercase, specific, concise)
+12. Return consolidated results
     </sequential_execution>
     </step3_execute>
     </process>
